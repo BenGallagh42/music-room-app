@@ -1,0 +1,154 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Param,
+  Post,
+  Get,
+  Patch,
+  Req,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RoomVisibilityGuard } from '../rooms/guards/visibility.guard';
+import { AccessPolicyGuard } from '../rooms/guards/access.guard';
+import { TracksService } from './tracks.service';
+import { AddTrackDto } from './dto/add-track.dto';
+import { ReorderTrackDto } from './dto/reorder-track.dto';
+import { SearchTracksDto } from './dto/search-track.dto';
+import { TrackResponseDto, TrackMessageResponseDto } from './dto/track-response.dto';
+import type { Request } from 'express';
+
+interface AuthenticatedUser {
+  id: string;
+  email: string | null;
+}
+
+@ApiTags('Tracks')
+@ApiBearerAuth('access-token')
+@Controller('rooms/:roomId/tracks')
+@UseGuards(JwtAuthGuard, RoomVisibilityGuard)
+export class TracksController {
+  constructor(private tracksService: TracksService) {}
+
+  @Post()
+  @UseGuards(AccessPolicyGuard)
+  @ApiOperation({ summary: 'Add a track to the room queue' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiBody({ type: AddTrackDto })
+  @ApiResponse({ status: 201, description: 'Track added to queue', type: TrackResponseDto })
+  addTrack(@Param('roomId') roomId: string, @Body() dto: AddTrackDto) {
+    return this.tracksService.addTrack(roomId, dto.deezerTrackId);
+  }
+
+  @Delete(':trackId')
+  @UseGuards(AccessPolicyGuard)
+  @ApiOperation({ summary: 'Remove a track from the queue' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiParam({ name: 'trackId', description: 'Track id in room queue' })
+  @ApiResponse({ status: 200, description: 'Track removed', type: TrackMessageResponseDto })
+  removeTrack(
+    @Param('roomId') roomId: string,
+    @Param('trackId') trackId: string,
+  ) {
+    return this.tracksService.removeTrack(roomId, trackId);
+  }
+
+  @Post(':trackId/vote')
+  @UseGuards(AccessPolicyGuard)
+  @ApiOperation({ summary: 'Vote for a track' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiParam({ name: 'trackId', description: 'Track id in room queue' })
+  @ApiResponse({ status: 201, description: 'Vote added', type: TrackResponseDto })
+  vote(
+    @Param('roomId') roomId: string,
+    @Param('trackId') trackId: string,
+    @Req() req: Request & { user: AuthenticatedUser },
+  ) {
+    return this.tracksService.voteForTrack(roomId, trackId, req.user.id);
+  }
+
+  @Delete(':trackId/vote')
+  @UseGuards(AccessPolicyGuard)
+  @ApiOperation({ summary: 'Remove a vote from a track' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiParam({ name: 'trackId', description: 'Track id in room queue' })
+  @ApiResponse({ status: 200, description: 'Vote removed', type: TrackResponseDto })
+  unvote(
+    @Param('roomId') roomId: string,
+    @Param('trackId') trackId: string,
+    @Req() req: Request & { user: AuthenticatedUser },
+  ) {
+    return this.tracksService.unvoteTrack(roomId, trackId, req.user.id);
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'Get the current room queue' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiResponse({
+    status: 200,
+    description: 'Queue returned, votedByMe says if the caller voted for each track',
+    type: TrackResponseDto,
+    isArray: true
+  })
+  getQueue(
+      @Param('roomId') roomId: string,
+      @Req() req: Request & { user: AuthenticatedUser },
+  ) {
+      return this.tracksService.getQueue(roomId, req.user.id);
+  }
+
+  @Patch(':trackId/position')
+  @UseGuards(AccessPolicyGuard)
+  @ApiOperation({ summary: 'Reorder a track in the queue' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiParam({ name: 'trackId', description: 'Track id in room queue' })
+  @ApiBody({ type: ReorderTrackDto })
+  @ApiResponse({ status: 200, description: 'Queue reordered', type: TrackResponseDto, isArray: true })
+  reorder(
+    @Param('roomId') roomId: string,
+    @Param('trackId') trackId: string,
+    @Body() dto: ReorderTrackDto,
+  ) {
+    return this.tracksService.reorderTrack(
+      roomId,
+      trackId,
+      dto.afterTrackId ?? null,
+    );
+  }
+
+  @Get('search')
+  @ApiOperation({ summary: 'Search for tracks' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiQuery({
+    name: 'query',
+    required: true,
+    description: 'Track search query',
+  })
+  @ApiResponse({ status: 200, description: 'Matching tracks returned', type: TrackResponseDto, isArray: true })
+  searchTracks(@Param('roomId') roomId: string, @Query() dto: SearchTracksDto) {
+    return this.tracksService.searchTracks(dto.query);
+  }
+
+  @Post('next')
+  @UseGuards(AccessPolicyGuard)
+  @ApiOperation({ summary: 'Advance to the next track in the room' })
+  @ApiParam({ name: 'roomId', description: 'Room id' })
+  @ApiResponse({ status: 200, description: 'Next track triggered', type: TrackResponseDto, nullable: true })
+  triggerNext(
+    @Param('roomId') roomId: string,
+    @Req() req: Request & { user: AuthenticatedUser },
+  ) {
+    return this.tracksService.triggerNext(roomId, req.user.id);
+  }
+}
